@@ -10,6 +10,7 @@ from opacus.validators import ModuleValidator
 from tqdm import tqdm
 import warnings
 import math
+import utils
 
 warnings.filterwarnings("ignore")
 
@@ -17,8 +18,8 @@ warnings.filterwarnings("ignore")
 # --- 1. 配置参数 ---
 class Config:
     def __init__(self):
-        self.num_clients = 2
-        self.num_rounds = 2
+        self.num_clients = 10
+        self.num_rounds = 5
         self.local_epochs = 3
         self.batch_size = 64
         self.learning_rate = 0.01
@@ -72,41 +73,8 @@ class SimpleCNN(nn.Module):
         return x
 
 
-# --- 3. 数据加载与 Non-IID 划分 ---
-def get_data_loaders(num_clients, config):
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
-    ])
+# --- 3. 数据加载与 Non-IID 划分 放到 utils.py 中 ---
 
-    train_dataset = datasets.FashionMNIST(root='./data', train=True, download=True, transform=transform)
-    test_dataset = datasets.FashionMNIST(root='./data', train=False, download=True, transform=transform)
-
-    # 创建 Non-IID 数据分布 (每个客户端只有2个类别的样本)
-    labels = np.array(train_dataset.targets)
-    client_indices = [[] for _ in range(num_clients)]
-
-    # 每两个类别分给一个客户端。注意这里实现的分割是分到同一类别的不同客户端都拥有该类别下的所有样本，实际在医疗场景中
-    for i in range(num_clients):
-        class1_idx = i % 10
-        class2_idx = (i + 1) % 10
-
-        idx1 = np.where(labels == class1_idx)[0]
-        idx2 = np.where(labels == class2_idx)[0]
-
-        all_indices = np.concatenate((idx1, idx2))
-        np.random.shuffle(all_indices)
-        client_indices[i] = all_indices.tolist()
-
-    client_loaders = []
-    for indices in client_indices:
-        subset = Subset(train_dataset, indices)
-        loader = DataLoader(subset, batch_size=config.batch_size, shuffle=True)
-        client_loaders.append(loader)
-
-    test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
-
-    return client_loaders, test_loader
 
 
 # --- 4. 客户端训练 ---
@@ -419,7 +387,7 @@ def evaluate(model, test_loader, device):
 # --- 7. 主训练循环 ---
 def run_experiment(aggregation_method, config):
     server = Server(config)
-    client_loaders, test_loader = get_data_loaders(config.num_clients, config)
+    client_loaders, test_loader, client_samples_count = utils.get_data_loaders(config)
 
     accuracies = []
 
