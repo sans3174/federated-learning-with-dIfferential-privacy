@@ -21,6 +21,9 @@ def get_data_loaders(config):
                - test_loader (DataLoader): 用于测试的 DataLoader。
                - client_samples_count (list): 每个客户端分配到的样本数量列表。
     """
+    # 设置种子
+    np.random.seed(config.seed)
+
     num_clients = config.num_clients
 
     transform = transforms.Compose([

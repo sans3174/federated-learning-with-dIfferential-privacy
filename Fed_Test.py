@@ -11,6 +11,7 @@ from tqdm import tqdm
 import warnings
 import math
 import utils
+import os
 
 warnings.filterwarnings("ignore")
 
@@ -24,6 +25,8 @@ class Config:
         self.batch_size = 64
         self.learning_rate = 0.01
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.save_dir = "saved_models"
+        self.seed = 1234
 
         print(f"当前使用设备: {self.device}")
 
@@ -388,12 +391,19 @@ def evaluate(model, test_loader, device):
 def run_experiment(aggregation_method, config):
     server = Server(config)
     client_loaders, test_loader, client_samples_count = utils.get_data_loaders(config)
+    experiment_save_dir = os.path.join(config.save_dir, aggregation_method)
+    os.makedirs(experiment_save_dir, exist_ok=True)
+    print(f"Models for this experiment will be saved in: {experiment_save_dir}")
 
     accuracies = []
 
     print(f"\n--- Running Experiment: {aggregation_method} ---")
 
     for round_num in tqdm(range(config.num_rounds), desc='联邦聚合轮数进度', position=0):
+        round_dir = os.path.join(experiment_save_dir, f'round_{round_num + 1:02d}')
+        client_models_dir = os.path.join(round_dir, 'client_models')
+        os.makedirs(client_models_dir, exist_ok=True)
+
         client_updates = []
         for i in tqdm(range(config.num_clients), desc='单轮聚合内已训练客户端数目', position=1):
             client_model = SimpleCNN().to(config.device)
@@ -416,11 +426,20 @@ def run_experiment(aggregation_method, config):
             update = client_update(client_model, optimizer, data_loader_with_sample_rate, config)
             client_updates.append(update)
 
+            # 保存客户端模型参数
+            client_save_path = os.path.join(client_models_dir, f'client_{i}_model.pth')
+            torch.save(update, client_save_path)
+
+
         # 服务器聚合
         if aggregation_method == 'DP-FedAvg':
             server.aggregate_dp_fedavg(client_updates)
         elif aggregation_method == 'Fed-Kalman':
             server.aggregate_fed_kalman_adaptive_noise(client_updates)
+
+        # 保存聚合后全局模型参数
+        global_model_save_path = os.path.join(round_dir, 'global_model_aggregated.pth')
+        torch.save(server.global_model.state_dict(), global_model_save_path)
 
         # 评估
         acc = evaluate(server.global_model, test_loader, config.device)
